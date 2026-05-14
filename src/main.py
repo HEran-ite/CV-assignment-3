@@ -33,6 +33,7 @@ from cv_assignment3.models.nasnet import build_nasnet, nasnet_suggested_input_si
 
 
 def set_seed(seed: int) -> None:
+    """Fix RNGs so the 45k/5k train/val split and weight init are reproducible."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -40,6 +41,7 @@ def set_seed(seed: int) -> None:
 
 
 def accuracy(output: torch.Tensor, target: torch.Tensor) -> float:
+    """Batch top-1 accuracy in percent (argmax over class dimension)."""
     pred = output.argmax(dim=1)
     return (pred == target).float().mean().item() * 100.0
 
@@ -52,6 +54,10 @@ def train_one_epoch(
     device: torch.device,
     max_batches: int | None = None,
 ) -> Tuple[float, float]:
+    """One pass over ``loader`` in train mode; returns mean loss and mean batch accuracy (%).
+
+    If ``max_batches`` is set, stops after that many mini-batches (partial epoch for demos).
+    """
     model.train()
     total_loss = 0.0
     total_acc = 0.0
@@ -59,11 +65,11 @@ def train_one_epoch(
     for images, labels in loader:
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
-        optimizer.zero_grad(set_to_none=True)
-        logits = model(images)
-        loss = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)  # clear grads from previous step
+        logits = model(images)  # [B, num_classes]
+        loss = criterion(logits, labels)  # cross-entropy vs one-hot index labels
+        loss.backward()  # autograd: d(loss)/d(params)
+        optimizer.step()  # AdamW weight update + weight decay
         total_loss += loss.item()
         total_acc += accuracy(logits.detach(), labels)
         n_batches += 1
@@ -80,6 +86,7 @@ def evaluate(
     device: torch.device,
     max_batches: int | None = None,
 ) -> Tuple[float, float]:
+    """Validation/test pass: no gradients; returns mean loss and mean batch accuracy (%)."""
     model.eval()
     total_loss = 0.0
     total_acc = 0.0
@@ -88,7 +95,7 @@ def evaluate(
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         logits = model(images)
-        loss = criterion(logits, labels)
+        loss = criterion(logits, labels)  # same loss as training; no backward()
         total_loss += loss.item()
         total_acc += accuracy(logits, labels)
         n_batches += 1
@@ -98,6 +105,7 @@ def evaluate(
 
 
 def pick_device(prefer: str) -> torch.device:
+    """Resolve ``auto`` / ``cuda`` / ``mps`` / ``cpu`` to an actual ``torch.device``."""
     prefer = prefer.lower()
     if prefer == "auto":
         if torch.cuda.is_available():
@@ -113,6 +121,7 @@ def pick_device(prefer: str) -> torch.device:
 
 
 def build_model(model_name: str, pretrained: bool, nasnet_variant: str = "mobile") -> nn.Module:
+    """Construct the requested CIFAR-10 classifier (10-way head)."""
     if model_name == "lenet":
         return LeNet5CIFAR(num_classes=10)
     if model_name == "nasnet":
@@ -166,6 +175,7 @@ def main() -> None:
     set_seed(args.seed)
     device = pick_device(args.device)
 
+    # Image size and default LR depend on model: LeNet stays at 32×32; NASNet resizes CIFAR.
     if args.model == "nasnet":
         img_size = args.img_size or nasnet_suggested_input_size(args.pretrained, args.nasnet_variant)
         default_lr = 3e-4 if args.pretrained else 1e-3
@@ -175,6 +185,7 @@ def main() -> None:
 
     lr = args.lr if args.lr is not None else default_lr
 
+    # 45k train / 5k val / 10k test; transforms match model (see data.py).
     train_loader, val_loader, test_loader = get_cifar10_loaders(
         model_name=args.model,
         batch_size=args.batch_size,
@@ -185,6 +196,7 @@ def main() -> None:
         data_dir=args.data_dir,
     )
 
+    # If training was capped per epoch, default test to a short pass unless user overrides.
     max_test_batches = args.max_test_batches
     if max_test_batches is None and args.max_train_batches is not None:
         max_test_batches = min(80, len(test_loader))
@@ -192,13 +204,16 @@ def main() -> None:
     variant_note = f" [{args.nasnet_variant}]" if args.model == "nasnet" else ""
     print(f"Building model ({args.model}{variant_note})…", flush=True)
     model = build_model(args.model, pretrained=args.pretrained, nasnet_variant=args.nasnet_variant).to(device)
+    # Multi-class softmax loss; logits need not be softmaxed (CrossEntropyLoss applies log-softmax).
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=args.weight_decay)
+    # LR decays smoothly over all epochs (no per-epoch restarts).
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Per-epoch metrics for learning curves (written to history_*.json at the end).
     history: Dict[str, list] = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
     best_val = -1.0
     best_path = out_dir / f"best_{args.model}.pt"
@@ -211,6 +226,7 @@ def main() -> None:
     print(f"Device: {device} | Model: {args.model} | img_size={img_size} | lr={lr}{cap_note}", flush=True)
     t0 = time.time()
     for epoch in range(1, args.epochs + 1):
+        # Train then validate; scheduler advances once per epoch (after both).
         tr_loss, tr_acc = train_one_epoch(
             model, train_loader, optimizer, criterion, device, max_batches=args.max_train_batches
         )
@@ -228,6 +244,7 @@ def main() -> None:
             f"val loss {va_loss:.4f} acc {va_acc:.2f}%",
             flush=True,
         )
+        # Keep the weights that achieved the best validation accuracy so far (model selection).
         if va_acc > best_val:
             best_val = va_acc
             torch.save(
@@ -245,7 +262,7 @@ def main() -> None:
                 best_path,
             )
 
-    # Load best weights for official test evaluation (detailed metrics, single pass).
+    # Reload best-by-validation weights (last epoch is not necessarily best).
     ckpt = torch.load(best_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state"])
 
@@ -271,7 +288,7 @@ def main() -> None:
         test_detail = detailed_test_report(
             model, test_loader, device, criterion=criterion, max_batches=max_test_batches
         )
-    test_detail["class_names"] = list(CIFAR10_CLASSES)
+    test_detail["class_names"] = list(CIFAR10_CLASSES)  # align rows in test_report JSON with CIFAR order
     te_acc = test_detail["overall_accuracy_pct"]
     te_loss = test_detail["mean_loss"]
     elapsed = time.time() - t0
@@ -279,6 +296,7 @@ def main() -> None:
 
     n_params = sum(p.numel() for p in model.parameters())
 
+    # Persist scalars, per-epoch curves, and full test breakdown for the report.
     summary = {
         "model": args.model,
         "nasnet_variant": args.nasnet_variant if args.model == "nasnet" else None,

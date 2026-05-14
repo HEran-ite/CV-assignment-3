@@ -8,8 +8,12 @@ Two canonical variants from the same paper:
   - NASNet-A *Large* : ~85M params, designed for ImageNet accuracy.
 
 For CIFAR-10 on CPU we **default to NASNet-A Mobile** so a full epoch is feasible.
-The implementation comes from the `pretrainedmodels` package (Cadene), which is
-the reference port of the original TensorFlow weights and code into PyTorch.
+The class implementation comes from ``pretrainedmodels`` (Cadene). ImageNet weights
+were originally hosted on ``data.lip6.fr``; that host now serves an **expired TLS
+certificate**, so we try that URL first, then fall back to a **GitHub release mirror**
+(same ``nasnetamobile-7e03cead`` checkpoint; the ``.pth.tar`` asset is a plain PyTorch
+state dict). Override with env ``NASNET_MOBILE_WEIGHT_PATH`` pointing at a local
+``.pth`` / checkpoint file to skip all downloads.
 
 NASNet-A Mobile expects 224x224 inputs by default because its head uses a fixed
 ``AvgPool2d(7)``. We patch that head to ``AdaptiveAvgPool2d(1)`` so the same
@@ -19,11 +23,59 @@ when training from scratch on CPU.
 
 from __future__ import annotations
 
+import os
+import warnings
 from typing import Literal
 
+import torch
 import torch.nn as nn
 
 NASNetVariant = Literal["mobile", "large"]
+
+# Same Cadene NASNet-A Mobile ImageNet checkpoint as ``pretrained_settings``; GitHub TLS is valid.
+_GITHUB_MOBILE_STATE_MIRROR = (
+    "https://github.com/veronikayurchuk/pretrained-models.pytorch/releases/download/v1.0/"
+    "nasnetmobile-7e03cead.pth.tar"
+)
+
+
+def _load_nasnetamobile_imagenet_state_dict(primary_url: str) -> dict:
+    """Load the public ImageNet state dict: try primary URL, then TLS-safe GitHub mirror."""
+    local = os.environ.get("NASNET_MOBILE_WEIGHT_PATH", "").strip()
+    if local:
+        path = os.path.expanduser(local)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"NASNET_MOBILE_WEIGHT_PATH is not a file: {path}")
+        return torch.load(path, map_location="cpu", weights_only=True)
+
+    try:
+        return torch.hub.load_state_dict_from_url(
+            primary_url,
+            progress=True,
+            map_location="cpu",
+            weights_only=True,
+        )
+    except Exception as primary_exc:  # SSL, 404, offline, etc.
+        warnings.warn(
+            f"NASNet-A Mobile weight download from primary URL failed ({primary_exc!r}); "
+            "trying GitHub mirror (same checkpoint, valid certificate).",
+            UserWarning,
+            stacklevel=2,
+        )
+    try:
+        return torch.hub.load_state_dict_from_url(
+            _GITHUB_MOBILE_STATE_MIRROR,
+            file_name="nasnetamobile-7e03cead.pth",
+            progress=True,
+            map_location="cpu",
+            weights_only=True,
+        )
+    except Exception as mirror_exc:
+        raise RuntimeError(
+            "Could not load NASNet-A Mobile ImageNet weights (primary URL and GitHub mirror). "
+            "Download the file manually and set NASNET_MOBILE_WEIGHT_PATH, or fix your network. "
+            f"Primary error: {primary_exc!r}; mirror error: {mirror_exc!r}"
+        ) from mirror_exc
 
 
 def _patch_adaptive_pool(model: nn.Module) -> nn.Module:
@@ -39,23 +91,14 @@ def _patch_adaptive_pool(model: nn.Module) -> nn.Module:
 
 
 def _build_nasnet_mobile(num_classes: int, pretrained: bool) -> nn.Module:
-    """NASNet-A Mobile via pretrainedmodels (Cadene)."""
-    from pretrainedmodels.models.nasnet_mobile import NASNetAMobile
+    """NASNet-A Mobile via pretrainedmodels (Cadene); pretrained weights via torch.hub URLs."""
+    from pretrainedmodels.models.nasnet_mobile import NASNetAMobile, pretrained_settings
 
     if pretrained:
-        # Loads ImageNet weights into a 1000-class head, then we swap the head.
         model = NASNetAMobile(num_classes=1000)
-        try:
-            from pretrainedmodels.models.nasnet_mobile import pretrained_settings
-            import torch.utils.model_zoo as model_zoo
-
-            settings = pretrained_settings["nasnetamobile"]["imagenet"]
-            state = model_zoo.load_url(settings["url"])
-            model.load_state_dict(state, strict=False)
-        except Exception as exc:  # pragma: no cover - network or layout issue
-            raise RuntimeError(
-                "Could not load NASNet-A Mobile ImageNet weights: " + str(exc)
-            ) from exc
+        settings = pretrained_settings["nasnetamobile"]["imagenet"]
+        state = _load_nasnetamobile_imagenet_state_dict(settings["url"])
+        model.load_state_dict(state, strict=False)
         in_features = model.last_linear.in_features
         model.last_linear = nn.Linear(in_features, num_classes)
     else:
