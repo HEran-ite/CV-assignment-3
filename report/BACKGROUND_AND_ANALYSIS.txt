@@ -1,0 +1,70 @@
+================================================================================
+ASSIGNMENT 3 — BACKGROUND: LeNet-5 (all groups) & NASNet (Group 8 / 2018)
+================================================================================
+
+1) LeNet-5 (LeCun et al., 1998) — baseline for all groups
+--------------------------------------------------------------------------------
+Motivation
+  Handwritten digit recognition required translation-invariant feature
+  extraction with trainable parameters at scale. Convolutional sharing of
+  weights reduced parameter count versus fully connected nets on raw pixels.
+
+Predecessors
+  Earlier work used shared-weight networks and convolutions in constrained
+  settings; LeNet-5 consolidated the full “conv → pool → conv → pool → FC”
+  pipeline for document analysis.
+
+Architectural ideas
+  - Local receptive fields (convolution) capture stroke-like patterns.
+  - Subsampling (pooling) builds tolerance to small shifts.
+  - Hierarchy of features: edges/shapes → digit parts → class logits.
+
+Differences vs later CNNs
+  - Small depth (two conv groups + FC stack); no batch norm, residual links,
+    or automated architecture search.
+  - Original MNIST pipeline used 32×32 grayscale; for CIFAR-10 we use the
+    same *logical* stages (C1–S2–C3–S4–FC) with RGB input and widths tuned
+    to 32×32 spatial resolution.
+
+Strengths / weaknesses / cost
+  + Extremely parameter-efficient; fast to train; pedagogically clear.
+  − Limited capacity for complex natural images vs modern deep nets.
+
+2) NASNet (Zoph et al., CVPR 2018; “Learning Transferable Architectures…”)
+--------------------------------------------------------------------------------
+Motivation
+  Hand-designed cells (e.g., Inception, ResNet) require expert search in a
+  huge discrete space. Neural Architecture Search (NAS) learns reusable cells
+  on a proxy task and transfers them to larger datasets / scales.
+
+Predecessor relationship
+  Builds on NAS / RL-based search ideas and on multi-branch “cell” motifs
+  similar in spirit to Inception modules, but replaces manual branching rules
+  with searched normal and reduction cells.
+
+Key innovations
+  - Normal cell: preserves spatial resolution; Reduction cell: halves spatial
+    size and increases channels (typical strided branches).
+  - Search on CIFAR-10-scale tasks, then stack cells for ImageNet-scale models.
+  - Mobile vs Large variants trade accuracy for compute (FLOPs / latency).
+
+Differences vs LeNet-5
+  - Depth and topology come from search, not a fixed 2-conv template.
+  - Heavy use of separable convolutions and mixed branches inside cells.
+  - Designed for high accuracy at higher computational budget.
+
+Strengths / weaknesses / cost
+  + Strong accuracy for its era; demonstrates transfer of searched cells.
+  − Training / inference cost is much higher than LeNet; search itself is
+    expensive (not reproduced in this coursework— we use published NASNet).
+
+3) Experimental setup (this repository)
+--------------------------------------------------------------------------------
+Dataset: CIFAR-10 (32×32 RGB, 10 classes) — realistic small-image benchmark.
+  - LeNet-5: native 32×32 inputs.
+  - NASNet-Mobile: images resized to 224×224 with ImageNet-style normalization
+    when using pretrained weights (optional); random crop/flip augmentation.
+
+Metrics reported during training: loss, top-1 accuracy on validation split.
+
+================================================================================

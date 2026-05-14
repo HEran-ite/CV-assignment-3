@@ -1,0 +1,152 @@
+================================================================================
+ASSIGNMENT 3 — BACKGROUND, PREDECESSORS, AND ANALYSIS (LeNet-5 + NASNet)
+================================================================================
+Use this text as the written part of your submission (expand with your own plots,
+tables, and presentation slides as required). Code lives in cv_assignment3/.
+
+--------------------------------------------------------------------------------
+1. LeNet-5 (1998) — required for ALL groups
+--------------------------------------------------------------------------------
+
+Motivation
+  Hand-crafted features dominated early vision. LeNet-5 showed that *hierarchical*
+  representations could be learned end-to-end from pixels using backpropagation,
+  enabling robust digit recognition with far less domain-specific preprocessing.
+
+Architectural idea
+  Alternating convolutional layers (local receptive fields + weight sharing) and
+  pooling layers (subsampling) build translation-tolerant features, followed by
+  fully connected layers for classification. Depth is shallow by modern standards,
+  but the *pattern* (conv → pool → … → FC) is the template for later CNNs.
+
+Predecessor / context
+  Earlier LeNet variants (e.g. LeNet-4) explored similar ideas on smaller tasks.
+  LeNet-5 consolidated the design for document / digit recognition at 32×32
+  resolution. There was no deep residual stack or batch normalization; training
+  relied on careful initialization and dataset scale appropriate to the era.
+
+How our implementation relates to the original
+  The original MNIST model used 32×32 grayscale inputs. For CIFAR-10 we keep the
+  same *depth pattern* (two conv+pool stages, three FC layers) but use three
+  input channels and ReLU activations (common modern substitute for tanh/sigmoid
+  in teaching code — note this in your presentation as a deliberate, documented
+  deviation from the historical activation choice).
+
+Strengths
+  - Extremely parameter-efficient; trains quickly on CPU or modest GPU.
+  - Clear pedagogical map from tensor shapes to “what the network sees.”
+
+Weaknesses / limits on CIFAR-10
+  - Capacity is low; expect moderate accuracy (~60–75% depending on epochs and
+    augmentation), far below deep architectures.
+  - No skip connections, attention, or advanced regularization beyond pooling.
+
+--------------------------------------------------------------------------------
+2. NASNet (2018) — your group’s architecture (with LeNet-5 above)
+--------------------------------------------------------------------------------
+
+Motivation
+  Designing convolutional cells (micro-architecture) and wiring them into a
+  macro network is labor-intensive. NASNet automates *cell search* on a proxy
+  task, then stacks the discovered normal cell and reduction cell to form a
+  high-capacity network competitive on ImageNet.
+
+Predecessors it builds on
+  - **Network architecture search (NAS)** and reinforcement / gradient-based
+    search methods showed that architectures could be optimized as a search problem.
+  - **Inception-style multi-branch motifs** and **ResNet-style skip pathways**
+    influenced the *search space* (the kinds of operations and combinations the
+    algorithm was allowed to compose).
+
+What changed vs hand-designed CNNs of the same era
+  Instead of a human fixing every branch and filter count, NAS proposes a cell
+  template; search finds operator choices and connections within the cell. The
+  resulting NASNet-A family repeats these cells at scale, trading **human design
+  time** for **compute-heavy search** and a more complex forward graph.
+
+Implementation note for this project
+  The NASNet paper introduces two variants discovered by the same search:
+    - NASNet-A *Mobile*  (~4.2M params, designed for mobile/edge)
+    - NASNet-A *Large*   (~85M params, designed for ImageNet accuracy)
+
+  Because we train on a laptop CPU, we **default to NASNet-A Mobile** via the
+  `pretrainedmodels` library (Cadene), which is the reference PyTorch port of
+  the original TensorFlow code/weights. The Large variant remains selectable
+  via `--nasnet-variant large` (uses `timm`'s `nasnetalarge`) for GPU runs.
+
+  NASNet-A Mobile originally uses a fixed 7×7 average pool at the head (assumes
+  224×224 input). We replace that head with an adaptive 1×1 average pool so the
+  same network also accepts smaller inputs (e.g. 96 or 128) — essential when
+  doing full-epoch training on CPU.
+
+Strengths
+  - Very high representational capacity; strong baseline when pretrained or when
+    trained with sufficient budget.
+  - Demonstrates the practical endpoint of “NAS → transferable cell block.”
+
+Weaknesses / tradeoffs
+  - Many more parameters and FLOPs than LeNet-5; slower training, higher GPU
+    memory, more risk of overfitting on small datasets without augmentation or
+    transfer learning.
+  - The search itself is not reproduced in student code — you study and *use*
+    the discovered architecture.
+
+Suggested talking points for “computational tradeoffs”
+  Compare parameter counts and wall-clock per epoch (LeNet vs NASNet), and
+  validation accuracy vs training cost. Optionally report FLOPs using a profiler
+  or published figures for NASNet-A Large.
+
+--------------------------------------------------------------------------------
+3. Dataset (working project requirement)
+--------------------------------------------------------------------------------
+
+We use **CIFAR-10**: 32×32 natural images, 10 classes, 50k train / 10k test. It is
+small enough for coursework yet realistic enough to show that depth and
+architecture matter. The training split is further divided into 45k train / 5k
+validation for model selection; the official test set is used once at the end
+with the best validation checkpoint.
+
+--------------------------------------------------------------------------------
+4. How to run experiments (for the report appendix)
+--------------------------------------------------------------------------------
+
+  pip install -r requirements.txt
+  python -m cv_assignment3.main --model lenet --epochs 20 --batch-size 128
+
+  # NASNet-A Mobile (default), CPU-friendly full-epoch training:
+  python -m cv_assignment3.main --model nasnet --epochs 3 --batch-size 16 --img-size 96
+
+  # NASNet-A Mobile with ImageNet pretraining + fine-tune (downloads ~25 MB weights):
+  python -m cv_assignment3.main --model nasnet --pretrained --epochs 3 --batch-size 16 --img-size 224
+
+  # NASNet-A Large (GPU recommended):
+  python -m cv_assignment3.main --model nasnet --nasnet-variant large --epochs 15 \\
+    --batch-size 32 --img-size 224 --device cuda
+
+When ``--max-train-batches`` is set (slow hardware / smoke tests), final test
+metrics default to the first ``min(80, len(test_loader))`` batches unless you
+pass ``--max-test-batches``.
+
+Artifacts written to ./checkpoints/: best_*.pt, summary_*.json, history_*.json,
+and test_report_*.json (per-class accuracy, confusion matrix, mean test loss).
+
+Re-evaluate a saved checkpoint without retraining:
+
+  python -m cv_assignment3.evaluate_checkpoint --checkpoint ./checkpoints/best_lenet.pt
+
+This writes eval_*_detailed.json and a .confusion.csv for slides or spreadsheets.
+
+--------------------------------------------------------------------------------
+5. Dataset files and offline use
+--------------------------------------------------------------------------------
+
+The code prefers loading CIFAR-10 **without** opening a network connection when
+``./data/cifar-10-batches-py`` already exists, or when ``cifar-10-python.tar.gz``
+is present with the correct MD5 and can be extracted locally.
+
+If you previously interrupted a download, you may have a **truncated** tarball
+(extraction then fails with EOFError, or MD5 check fails). Fix by deleting
+``data/cifar-10-python.tar.gz`` and any partial ``data/cifar-10-batches-py`` folder,
+then run training once with internet access so torchvision can re-download.
+
+================================================================================
