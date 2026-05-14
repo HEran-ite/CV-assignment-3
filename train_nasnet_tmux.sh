@@ -101,6 +101,7 @@ fi
   echo '#!/usr/bin/env bash'
   echo 'set -euo pipefail'
   echo "cd $(printf '%q' "$ROOT")"
+  echo "export PYTHONPATH=$(printf '%q' "$ROOT")\${PYTHONPATH:+:\${PYTHONPATH}}"
   echo 'export PYTHONUNBUFFERED=1'
   echo "mkdir -p $(printf '%q' "$LOG_DIR")"
   echo "{"

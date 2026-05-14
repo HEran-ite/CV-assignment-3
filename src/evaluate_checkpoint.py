@@ -8,9 +8,16 @@ Example:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_repo_root = Path(__file__).resolve().parent.parent
+_rp = str(_repo_root)
+if _rp not in sys.path:
+    sys.path.insert(0, _rp)
+
 import argparse
 import json
-from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -67,9 +74,22 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss()
 
     # Confusion matrix + per-class accuracy; optional batch cap for slow models on CPU.
-    detail = detailed_test_report(
-        model, test_loader, device, criterion=criterion, max_batches=args.max_test_batches
-    )
+    # MPS: long CrossEntropyLoss over the full test loader can throw AcceleratorError; use a fresh CPU model.
+    if device.type == "mps":
+        eval_model = build_model(model_name, pretrained=pretrained, nasnet_variant=nasnet_variant).cpu()
+        eval_model.load_state_dict(ckpt["model_state"])
+        detail = detailed_test_report(
+            eval_model,
+            test_loader,
+            torch.device("cpu"),
+            criterion=criterion,
+            max_batches=args.max_test_batches,
+        )
+        detail["test_eval_device"] = "cpu (fresh model; MPS-safe)"
+    else:
+        detail = detailed_test_report(
+            model, test_loader, device, criterion=criterion, max_batches=args.max_test_batches
+        )
     detail["model"] = model_name
     detail["checkpoint"] = str(ckpt_path.resolve())
     detail["epoch_saved"] = ckpt.get("epoch")

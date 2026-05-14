@@ -15,11 +15,19 @@ CPU / smoke NASNet (caps part of each epoch — document in report; use full run
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# macOS multiprocessing (spawn) + DataLoader workers re-import this module; repo root must be on path.
+_repo_root = Path(__file__).resolve().parent.parent
+_rp = str(_repo_root)
+if _rp not in sys.path:
+    sys.path.insert(0, _rp)
+
 import argparse
 import json
 import random
 import time
-from pathlib import Path
 from typing import Dict, Tuple
 
 import numpy as np
