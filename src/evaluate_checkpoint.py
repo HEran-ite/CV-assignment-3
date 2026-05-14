@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Load a checkpoint saved by cv_assignment3.main and report detailed test metrics.
+Load a checkpoint saved by src.main and report detailed test metrics.
 
 Example:
-  python -m cv_assignment3.evaluate_checkpoint --checkpoint ./checkpoints/best_lenet.pt
+  python -m src.evaluate_checkpoint --checkpoint ./checkpoints/best_lenet.pt
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ import json
 import torch
 import torch.nn as nn
 
-from cv_assignment3.data import CIFAR10_CLASSES, get_cifar10_loaders
-from cv_assignment3.main import build_model, pick_device
-from cv_assignment3.metrics import confusion_matrix_to_csv_rows, detailed_test_report
+from src.data import CIFAR10_CLASSES, get_cifar10_loaders
+from src.main import build_model, pick_device
+from src.metrics import confusion_matrix_to_csv_rows, detailed_test_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,7 +50,7 @@ def main() -> None:
     device = pick_device(args.device)
     ckpt_path = Path(args.checkpoint)
     # ``weights_only=False`` so we load the full dict (hyperparams + state_dict).
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 
     # Rebuild the same preprocessing as training (img_size, normalization, NASNet variant).
     model_name = ckpt["model"]
@@ -69,15 +69,16 @@ def main() -> None:
         data_dir=args.data_dir,
     )
 
-    model = build_model(model_name, pretrained=pretrained, nasnet_variant=nasnet_variant).to(device)
-    model.load_state_dict(ckpt["model_state"])  # trained weights only; fresh optimizer not needed for eval
+    # ``pretrained=False``: weights come only from the checkpoint (avoids ImageNet download on eval).
+    model = build_model(model_name, pretrained=False, nasnet_variant=nasnet_variant).to(device)
+    model.load_state_dict(ckpt["model_state"], strict=False)
     criterion = nn.CrossEntropyLoss()
 
     # Confusion matrix + per-class accuracy; optional batch cap for slow models on CPU.
     # MPS: long CrossEntropyLoss over the full test loader can throw AcceleratorError; use a fresh CPU model.
     if device.type == "mps":
-        eval_model = build_model(model_name, pretrained=pretrained, nasnet_variant=nasnet_variant).cpu()
-        eval_model.load_state_dict(ckpt["model_state"])
+        eval_model = build_model(model_name, pretrained=False, nasnet_variant=nasnet_variant).cpu()
+        eval_model.load_state_dict(ckpt["model_state"], strict=False)
         detail = detailed_test_report(
             eval_model,
             test_loader,

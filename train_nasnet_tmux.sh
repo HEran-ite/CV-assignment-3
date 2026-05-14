@@ -73,7 +73,7 @@ fi
 
 # Two command lines: with or without --pretrained (no empty-flag edge cases).
 if ((${#PRE_FLAG[@]})); then
-  TRAIN_CMD="$(printf '%q' "$VENV") -m cv_assignment3.main \
+  TRAIN_CMD="$(printf '%q' "$VENV") -m src.main \
   --model nasnet \
   --nasnet-variant mobile \
   --pretrained \
@@ -85,7 +85,7 @@ if ((${#PRE_FLAG[@]})); then
   --data-dir $(printf '%q' "${ROOT}/data") \
   --out-dir $(printf '%q' "$OUT_DIR")"
 else
-  TRAIN_CMD="$(printf '%q' "$VENV") -m cv_assignment3.main \
+  TRAIN_CMD="$(printf '%q' "$VENV") -m src.main \
   --model nasnet \
   --nasnet-variant mobile \
   --img-size ${NASNET_IMG_SIZE} \

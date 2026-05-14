@@ -3,13 +3,13 @@
 Train and evaluate LeNet-5 or NASNet on CIFAR-10.
 
 Examples:
-  python -m cv_assignment3.main --model lenet --epochs 20 --batch-size 128
-  python -m cv_assignment3.main --model nasnet --epochs 5 --batch-size 16 --img-size 224
-  python -m cv_assignment3.main --model nasnet --pretrained --epochs 10 --batch-size 8 --img-size 331
+  python -m src.main --model lenet --epochs 20 --batch-size 128
+  python -m src.main --model nasnet --epochs 5 --batch-size 16 --img-size 224
+  python -m src.main --model nasnet --pretrained --epochs 10 --batch-size 8 --img-size 331
 
 CPU / smoke NASNet (caps part of each epoch — document in report; use full runs on GPU):
 
-  python -m cv_assignment3.main --model nasnet --epochs 8 --batch-size 8 --img-size 96 \\
+  python -m src.main --model nasnet --epochs 8 --batch-size 8 --img-size 96 \\
     --max-train-batches 120 --max-val-batches 40
 """
 
@@ -34,10 +34,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from cv_assignment3.data import CIFAR10_CLASSES, get_cifar10_loaders
-from cv_assignment3.metrics import detailed_test_report
-from cv_assignment3.models.lenet5 import LeNet5CIFAR
-from cv_assignment3.models.nasnet import build_nasnet, nasnet_suggested_input_size
+from src.data import CIFAR10_CLASSES, get_cifar10_loaders
+from src.metrics import detailed_test_report
+from src.models.lenet5 import LeNet5CIFAR
+from src.models.nasnet import build_nasnet, nasnet_suggested_input_size
 
 
 def set_seed(seed: int) -> None:
